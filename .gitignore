@@ -1,0 +1,10 @@
+*.ipynb_checkpoints
+*Output*
+*Input
+.vscode
+*.o
+*.exe
+*slurm*
+*dask-worker*
+*logs
+Cluster/src
