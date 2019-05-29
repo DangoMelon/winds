@@ -131,7 +131,7 @@ program netcdf_mean_to_bin
       type(timedelta)                   :: t_delta
     
       ! LAT/LON variables
-      integer :: latid, lonid
+      integer :: i
 
       !Constants 
       real :: Cd = 1.2E-3, rho = 1.2
@@ -146,15 +146,14 @@ program netcdf_mean_to_bin
       call check( nf90_inq_varid(ncid, "eastward_wind", ewid) )
       call check( nf90_inq_varid(ncid, "northward_wind", nwid) )
       call check( nf90_inq_varid(ncid, "time",   tid) )
-      call check( nf90_inq_varid(ncid, "lat", latid) )
-      call check( nf90_inq_varid(ncid, "lon", lonid) )
       
       ! Read variable data
       call check( nf90_get_var(ncid,   ewid,  ew_data) )
       call check( nf90_get_var(ncid,   nwid,  nw_data) )
       call check( nf90_get_var(ncid,    tid, time_data) )
-      call check( nf90_get_var(ncid,  latid,  lat_data) )
-      call check( nf90_get_var(ncid,  lonid,  lon_data) )
+
+      lat_data = [(-80+0.25*i,i=0,NY-1)]
+      lon_data = [(-180+0.25*i,i=0,NY-1)]
 
       ! Compute wind stress
       where( ew_data /= 9.96920996838687e+36 .and. nw_data /= 9.96920996838687e+36 )
