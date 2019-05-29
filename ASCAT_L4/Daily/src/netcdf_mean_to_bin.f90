@@ -153,7 +153,7 @@ program netcdf_mean_to_bin
       call check( nf90_get_var(ncid,    tid, time_data) )
 
       lat_data = [(-80+0.25*i,i=0,NY-1)]
-      lon_data = [(-180+0.25*i,i=0,NY-1)]
+      lon_data = [(-180+0.25*i,i=0,NX-1)]
 
       ! Compute wind stress
       where( ew_data /= 9.96920996838687e+36 .and. nw_data /= 9.96920996838687e+36 )
