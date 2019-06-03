@@ -64,7 +64,8 @@ program netcdf_mean_to_bin
     end if
     ix_counter = f_ix + 2
     file_name = IN_FILE(ix_prev:ix_counter+ix_prev-1)
-    call load_wind(file_name, NX, NY, TAUx, TAUy, lat_data, lon_data, time_raw, time_data)
+    call load_wind(file_name, NX, NY, TAUx, TAUy, &
+                   lat_data, lon_data, time_raw, time_data, is_leap)
     acumx =+ TAUx
     acumy =+ TAUy
     ix_counter = ix_counter + 1
@@ -89,7 +90,8 @@ program netcdf_mean_to_bin
     tauy_anom = -999.
   end where
 
-  call to_netcdf(OUT_FILE_NC, lat_data, lon_data, time_raw, acumx, acumy, taux_anom, tauy_anom, NX, NY)
+  call to_netcdf(OUT_FILE_NC, lat_data, lon_data, time_raw, &
+                 acumx, acumy, taux_anom, tauy_anom, NX, NY)
 
   ! Write binary file with data
   open(newunit=out_id, file=OUT_FILE, form="unformatted", &
@@ -121,9 +123,9 @@ program netcdf_mean_to_bin
     
       ! Climatology data
       character (len = *), parameter :: CLIM_BASE_taux = &
-      "/data/users/grivera/WIND_L4BLEND/clim/clim_taux_blend_1992-2010_365.dat"
+      "/data/datos/ASCAT/DATA_L4_clim/clim_taux_blend_1992-2010_365.dat"
       character (len = *), parameter :: CLIM_BASE_tauy = &
-      "/data/users/grivera/WIND_L4BLEND/clim/clim_tauy_blend_1992-2010_365.dat"
+      "/data/datos/ASCAT/DATA_L4_clim/clim_tauy_blend_1992-2010_365.dat"
       character (len = :), allocatable :: CLIM_FILE_taux
       character (len = :), allocatable :: CLIM_FILE_tauy
       
@@ -151,11 +153,14 @@ program netcdf_mean_to_bin
     
     end subroutine load_climatology
 
-    subroutine load_wind( WIND_NC, NX, NY, taux, tauy, lat_data, lon_data, time_raw, time_data)
+    subroutine load_wind( WIND_NC, NX, NY, taux, tauy, &
+                         lat_data, lon_data, time_raw, &
+                         time_data, is_leap)
       character (len = *) , intent(in) :: WIND_NC
-      integer, intent(in) :: NX, NY
+      integer, intent(in)  :: NX, NY
       integer, intent(out) :: time_raw, time_data
-      real, intent(out)   :: taux(NX,NY), tauy(NX,NY), lat_data(NY), lon_data(NX)
+      real   , intent(out) :: taux(NX,NY), tauy(NX,NY), lat_data(NY), lon_data(NX)
+      logical, intent(out) :: is_leap
       real   :: ew_data(NX, NY), nw_data(NX, NY)
 
       ! Netcdf I/O
@@ -169,7 +174,6 @@ program netcdf_mean_to_bin
       character (len = :), allocatable  :: time_units
       character (len = 256)             :: time_buffer
       integer                           :: tid, year, st
-      logical                           :: is_leap
       type(datetime)                    :: t_since, t_file
       type(timedelta)                   :: t_delta
     
@@ -232,7 +236,8 @@ program netcdf_mean_to_bin
 
     end subroutine load_wind
 
-    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, TAUx, TAUy, TAUx_anom, TAUy_anom, NX, NY)
+    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, TAUx, TAUy, &
+                         TAUx_anom, TAUy_anom, NX, NY)
       integer, intent(in) :: NX, NY, time_raw
       real   , intent(in) :: TAUx(NX,NY), TAUy(NX,NY), TAUx_anom(NX,NY), TAUy_anom(NX,NY)
       real   , intent(in) :: lats(NY), lons(NX)
