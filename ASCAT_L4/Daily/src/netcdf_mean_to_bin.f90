@@ -10,23 +10,16 @@ program netcdf_mean_to_bin
   use datetime_module
   implicit none
   
-  interface
-    function load_climatology ( yearday, NX, NY, is_leap ) result(clim)
-      integer, intent(in)  :: yearday, NX, NY
-      logical, intent(in)  :: is_leap
-      real                 :: clim(NX,NY)
-      integer              :: climid
-    end function load_climatology
-  end interface
-  
   ! I/O data
   integer out_id
   ! Declare data holders
   integer, parameter  :: NX = 1440, NY = 641
-  real                :: sc_adt(NX,NY) = -999., sc_sla(NX,NY) = -999., &
-                         clim(NX,NY), new_anom(NX,NY),mask(NX,NY) = 1., mask_clim(NX,NY) = 1.
-  real                :: TAUx(NX, NY), TAUy(NX, NY), acumx(NX, NY) = 0., acumy(NX, NY) = 0.
-  integer             :: i, j, file_count = 0
+  real                :: clim_taux(NX,NY), clim_tauy(NX,NY), &
+                         acumx(NX, NY) = 0., acumy(NX, NY) = 0.
+  real                :: TAUx(NX, NY), TAUy(NX, NY), &
+                         taux_anom(NX,NY), tauy_anom(NX,NY)
+
+  integer             :: file_count = 0
 
   ! Variables
   real :: lat_data(NY), lon_data(NX)
@@ -37,7 +30,7 @@ program netcdf_mean_to_bin
                                        buffer_out_nc
 
   ! Declare time variables
-  integer                           :: time_raw
+  integer                           :: time_raw, time_data
   logical                           :: is_leap
 
   ! File looping ids
@@ -63,7 +56,6 @@ program netcdf_mean_to_bin
 
   write( *, '(a,1x,a,/)' ) "Input file is: ", IN_FILE, "Ouput file is: ", OUT_FILE
 
-  ! f_ix = index( IN_FILE, ".nc" )
   ix_prev = 1
   do while ( .true. )
     f_ix = index( IN_FILE(ix_prev:), ".nc" )
@@ -72,7 +64,7 @@ program netcdf_mean_to_bin
     end if
     ix_counter = f_ix + 2
     file_name = IN_FILE(ix_prev:ix_counter+ix_prev-1)
-    call load_wind(file_name, NX, NY, TAUx, TAUy, lat_data, lon_data, time_raw)
+    call load_wind(file_name, NX, NY, TAUx, TAUy, lat_data, lon_data, time_raw, time_data)
     acumx =+ TAUx
     acumy =+ TAUy
     ix_counter = ix_counter + 1
@@ -82,15 +74,28 @@ program netcdf_mean_to_bin
 
   acumx = acumx/file_count
   acumy = acumy/file_count
-  ! clim = load_climatology( time_data, NX, NY, is_leap )
+  
+  call load_climatology( time_data, NX, NY, is_leap, clim_taux, clim_tauy )
 
-  call to_netcdf(OUT_FILE_NC, lat_data, lon_data, time_raw, acumx, acumy, NX, NY)
+  where(acumx /= -999. .and. clim_taux /= -999.)
+    taux_anom = acumx - clim_taux
+  elsewhere
+    taux_anom = -999.
+  end where
+
+  where(acumy /= -999. .and. clim_tauy /= -999.)
+    tauy_anom = acumy - clim_tauy
+  elsewhere
+    tauy_anom = -999.
+  end where
+
+  call to_netcdf(OUT_FILE_NC, lat_data, lon_data, time_raw, acumx, acumy, taux_anom, tauy_anom, NX, NY)
 
   ! Write binary file with data
   open(newunit=out_id, file=OUT_FILE, form="unformatted", &
-        access="direct", recl=NX*NY*4*2, &
+        access="direct", recl=NX*NY*4*4, &
         status="unknown", convert="big_endian")
-  write(unit=out_id,rec=1) acumx, acumy
+  write(unit=out_id,rec=1) acumx, acumy, taux_anom, tauy_anom
   close(unit=out_id)
 
 
@@ -107,10 +112,49 @@ program netcdf_mean_to_bin
       end if
     end subroutine check
 
-    subroutine load_wind( WIND_NC, NX, NY, taux, tauy, lat_data, lon_data, time_raw)
+    subroutine load_climatology ( yearday, NX, NY, is_leap, clim_taux, clim_tauy)
+      ! Input/Output data
+      integer, intent(in)  :: yearday, NX, NY
+      logical, intent(in)  :: is_leap
+      real   , intent(out) :: clim_taux(NX,NY), clim_tauy(NX,NY)
+      integer              :: clim_tauid
+    
+      ! Climatology data
+      character (len = *), parameter :: CLIM_BASE_taux = &
+      "/data/users/grivera/WIND_L4BLEND/clim/clim_taux_blend_1992-2010_365.dat"
+      character (len = *), parameter :: CLIM_BASE_tauy = &
+      "/data/users/grivera/WIND_L4BLEND/clim/clim_tauy_blend_1992-2010_365.dat"
+      character (len = :), allocatable :: CLIM_FILE_taux
+      character (len = :), allocatable :: CLIM_FILE_tauy
+      
+      if ( is_leap .EQV. .true. ) then
+        CLIM_FILE_taux = CLIM_BASE_taux(:len(CLIM_BASE_taux)-7) //"366.dat"
+        CLIM_FILE_tauy = CLIM_BASE_tauy(:len(CLIM_BASE_tauy)-7) //"366.dat"
+      else
+        CLIM_FILE_taux = CLIM_BASE_taux
+        CLIM_FILE_tauy = CLIM_BASE_tauy
+      end if
+      write(*,'(a,1x,a,/)') "Loading climatology from file: ", CLIM_FILE_taux
+      write(*,'(a,1x,a,/)') "Loading climatology from file: ", CLIM_FILE_tauy
+    
+      open(newunit=clim_tauid, file=CLIM_FILE_taux, form="unformatted", &
+            access="direct", recl=NX*NY*4, &
+            status="old", convert="big_endian")
+      read(unit=clim_tauid, rec=yearday) clim_taux
+      close(unit=clim_tauid)
+    
+      open(newunit=clim_tauid, file=CLIM_FILE_tauy, form="unformatted", &
+            access="direct", recl=NX*NY*4, &
+            status="old", convert="big_endian")
+      read(unit=clim_tauid, rec=yearday) clim_tauy
+      close(unit=clim_tauid)
+    
+    end subroutine load_climatology
+
+    subroutine load_wind( WIND_NC, NX, NY, taux, tauy, lat_data, lon_data, time_raw, time_data)
       character (len = *) , intent(in) :: WIND_NC
       integer, intent(in) :: NX, NY
-      integer, intent(out) :: time_raw
+      integer, intent(out) :: time_raw, time_data
       real, intent(out)   :: taux(NX,NY), tauy(NX,NY), lat_data(NY), lon_data(NX)
       real   :: ew_data(NX, NY), nw_data(NX, NY)
 
@@ -118,16 +162,15 @@ program netcdf_mean_to_bin
       integer :: ncid
       
       ! Netcdf variables
-      real    :: sc_ew(NX,NY) , sc_nw(NX,NY) , wind_mag(NX,NY), &
-                 clim(NX,NY), new_anom(NX,NY),mask(NX,NY), mask_clim(NX,NY)
+      real    :: sc_ew(NX,NY) , sc_nw(NX,NY) , wind_mag(NX,NY)
       integer :: ewid, nwid
     
       ! Declare time variables
       character (len = :), allocatable  :: time_units
       character (len = 256)             :: time_buffer
-      integer                           :: tid, time_data, year, st
+      integer                           :: tid, year, st
       logical                           :: is_leap
-      type(datetime)                    :: t_since
+      type(datetime)                    :: t_since, t_file
       type(timedelta)                   :: t_delta
     
       ! LAT/LON variables
@@ -169,26 +212,29 @@ program netcdf_mean_to_bin
       call check( nf90_get_att(ncid,   tid,"units", time_buffer) )
       time_units = trim ( adjustl( time_buffer ) )
       write( *, '(i0,1x,a,/)') time_data, time_units
-      time_raw = time_data
     
       ! Convert date to datetime object
       t_since = strptime( time_units(13:),"%Y-%m-%d %H-%M-%S" )
       t_delta = timedelta(hours=time_data)
       ! Compute the file date
-      t_since   = t_since + t_delta
-      time_data = t_since % yearday()
-      year      = t_since % getYear()
+      t_file   = t_since + t_delta
+      time_data = t_file % yearday()
+      year      = t_file % getYear()
       is_leap   = isLeapYear(year)
+
+      !Compute new "days since" instead of "hours since"
+      t_delta = t_file - t_since
+      time_raw = t_delta % getDays()
     
-      write( *, '(a,1x,a,/,a,i0,/,a,L1,/)' ) "File date is: ", trim(t_since % strftime("%Y %B %d")), &
+      write( *, '(a,1x,a,/,a,i0,/,a,L1,/)' ) "File date is: ", trim(t_file % strftime("%Y %B %d")), &
                                            "Yearday: ", time_data, "Year is leap?: ", is_leap
       call check( nf90_close(ncid) )
 
     end subroutine load_wind
 
-    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, TAUx, TAUy, NX, NY)
+    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, TAUx, TAUy, TAUx_anom, TAUy_anom, NX, NY)
       integer, intent(in) :: NX, NY, time_raw
-      real   , intent(in) :: TAUx(NX,NY), TAUy(NX,NY)
+      real   , intent(in) :: TAUx(NX,NY), TAUy(NX,NY), TAUx_anom(NX,NY), TAUy_anom(NX,NY)
       real   , intent(in) :: lats(NY), lons(NX)
 
       ! File naming
@@ -201,7 +247,7 @@ program netcdf_mean_to_bin
       integer :: lon_dimid, lat_dimid, rec_dimid
 
       ! Variables definitions
-      integer :: taux_varid, tauy_varid
+      integer :: taux_varid, tauy_varid, tauxa_varid, tauya_varid
       integer :: dimids(NDIMS)
 
       ! Record counter
@@ -221,41 +267,51 @@ program netcdf_mean_to_bin
       call check( nf90_def_var(new_ncid,      "time", nf90_real, rec_dimid, rec_varid) )
 
       ! Add units
-      call check( nf90_put_att(new_ncid, lat_varid, "long_name", "Latitude") )
+      call check( nf90_put_att(new_ncid, lat_varid,     "long_name", "Latitude") )
       call check( nf90_put_att(new_ncid, lat_varid, "standard_name", "latitude") )
-      call check( nf90_put_att(new_ncid, lat_varid, "units", "degrees_north") )
+      call check( nf90_put_att(new_ncid, lat_varid,         "units", "degrees_north") )
       !++++++++++
-      call check( nf90_put_att(new_ncid, lon_varid, "long_name", "Longitude") )
+      call check( nf90_put_att(new_ncid, lon_varid,     "long_name", "Longitude") )
       call check( nf90_put_att(new_ncid, lon_varid, "standard_name", "longitude") )
-      call check( nf90_put_att(new_ncid, lon_varid, "units", "degrees_east") )
+      call check( nf90_put_att(new_ncid, lon_varid,         "units", "degrees_east") )
       !++++++++++
-      call check( nf90_put_att(new_ncid, rec_varid, "long_name", "Time") )
+      call check( nf90_put_att(new_ncid, rec_varid,     "long_name", "Time") )
       call check( nf90_put_att(new_ncid, rec_varid, "standard_name", "time") )
-      call check( nf90_put_att(new_ncid, rec_varid, "units", "hours since 1900-01-01 00:00:00") )
+      call check( nf90_put_att(new_ncid, rec_varid,         "units", "days since 1900-01-01 00:00:00") )
       
       dimids = [ lon_dimid, lat_dimid, rec_dimid ]
       ! Define variables
-      call check( nf90_def_var(new_ncid, "taux", nf90_real, dimids, taux_varid) )
-      call check( nf90_def_var(new_ncid, "tauy", nf90_real, dimids, tauy_varid) )
-      ! call check( nf90_def_var(new_ncid,  "sla", nf90_real, dimids, sla_varid) )
+      call check( nf90_def_var(new_ncid,      "taux", nf90_real, dimids, taux_varid) )
+      call check( nf90_def_var(new_ncid,      "tauy", nf90_real, dimids, tauy_varid) )
+      call check( nf90_def_var(new_ncid, "taux_anom", nf90_real, dimids, tauxa_varid) )
+      call check( nf90_def_var(new_ncid, "tauy_anom", nf90_real, dimids, tauya_varid) )
       ! Add attributes
-      call check( nf90_put_att(new_ncid, taux_varid, "long_name", "eastward wind stress") )
-      call check( nf90_put_att(new_ncid, taux_varid, "standard_name", "surface_downward_eastward_stress") )
-      call check( nf90_put_att(new_ncid, taux_varid, "units", "m") )
-      call check( nf90_put_att(new_ncid, taux_varid, "_FillValue", -999.) )
+      call check( nf90_put_att(new_ncid,  taux_varid,     "long_name", "eastward wind stress") )
+      call check( nf90_put_att(new_ncid,  taux_varid, "standard_name", "surface_downward_eastward_stress") )
+      call check( nf90_put_att(new_ncid,  taux_varid,         "units", "N/m^2") )
+      call check( nf90_put_att(new_ncid,  taux_varid,    "_FillValue", -999.) )
       !++++++++++
-      call check( nf90_put_att(new_ncid, tauy_varid, "long_name", "northward wind stress") )
-      call check( nf90_put_att(new_ncid, tauy_varid, "standard_name", "surface_downward_northward_stress") )
-      call check( nf90_put_att(new_ncid, tauy_varid, "units", "m") )
-      call check( nf90_put_att(new_ncid, tauy_varid, "_FillValue", -999.) )
+      call check( nf90_put_att(new_ncid,  tauy_varid,     "long_name", "northward wind stress") )
+      call check( nf90_put_att(new_ncid,  tauy_varid, "standard_name", "surface_downward_northward_stress") )
+      call check( nf90_put_att(new_ncid,  tauy_varid,         "units", "N/m^2") )
+      call check( nf90_put_att(new_ncid,  tauy_varid,    "_FillValue", -999.) )
       !++++++++++
-      ! call check( nf90_put_att(new_ncid, sla_varid, "long_name", "Sea Level Anomaly from 1993-2010 Climatology") )
-      ! call check( nf90_put_att(new_ncid, sla_varid, "standard_name", "sea_surface_height_above_climatological_sea_level") )
-      ! call check( nf90_put_att(new_ncid, sla_varid, "units", "m") )
-      ! call check( nf90_put_att(new_ncid, sla_varid, "_FillValue", -999.) )
+      call check( nf90_put_att(new_ncid, tauxa_varid,     "long_name", "eastward wind stress anomaly") )
+      call check( nf90_put_att(new_ncid, tauxa_varid, "standard_name", "surface_downward_eastward_stress_anomaly") )
+      call check( nf90_put_att(new_ncid, tauxa_varid,         "units", "N/m^2") )
+      call check( nf90_put_att(new_ncid, tauxa_varid,    "_FillValue", -999.) )
+      !++++++++++
+      call check( nf90_put_att(new_ncid, tauya_varid,     "long_name", "northward wind stress anomaly") )
+      call check( nf90_put_att(new_ncid, tauya_varid, "standard_name", "surface_downward_northward_stress_anomaly") )
+      call check( nf90_put_att(new_ncid, tauya_varid,         "units", "N/m^2") )
+      call check( nf90_put_att(new_ncid, tauya_varid,    "_FillValue", -999.) )
 
-      call check( nf90_put_att(new_ncid, nf90_global, "Edited", "Instituto Geofisico del Peru" ) )
-      call check( nf90_put_att(new_ncid, nf90_global, "Area", "Subdireccion de Ciencias de la Atmosfera e Hidrosfera" ) )
+      call check( nf90_put_att(new_ncid, nf90_global, "Original_file", "CMEMS WIND L4 Blended - SIW-IFREMER-BREST-FR" ) )
+      call check( nf90_put_att(new_ncid, nf90_global, "Created_by", "Instituto Geofisico del Peru" ) )
+      call check( nf90_put_att(new_ncid, nf90_global, "Dependency", "Subdireccion de Ciencias de la Atmosfera e Hidrosfera" ) )
+      call check( nf90_put_att(new_ncid, nf90_global, "Climatology", "1992-2010 Climatology interpolated to daily values &&
+                                                                      using a cubic spline") )
+      call check( nf90_put_att(new_ncid, nf90_global, "Daily_Values", "Computed from 6h averaged files" ) )
       ! End define mode
       call check( nf90_enddef(new_ncid) )
 
@@ -269,10 +325,11 @@ program netcdf_mean_to_bin
       start  = [  1,  1, 1 ]
 
       ! Write variable data
-      call check( nf90_put_var(new_ncid, taux_varid, TAUx, start = start, count = counts) )
-      call check( nf90_put_var(new_ncid, tauy_varid, TAUy, start = start, count = counts) )
-      ! call check( nf90_put_var(new_ncid,  sla_varid,  sla, start = start, count = counts) )
-      
+      call check( nf90_put_var(new_ncid,  taux_varid,      TAUx, start = start, count = counts) )
+      call check( nf90_put_var(new_ncid,  tauy_varid,      TAUy, start = start, count = counts) )
+      call check( nf90_put_var(new_ncid, tauxa_varid, TAUx_anom, start = start, count = counts) )
+      call check( nf90_put_var(new_ncid, tauya_varid, TAUy_anom, start = start, count = counts) )
+
       call check( nf90_close(new_ncid) )
 
       write(*,*) "*** SUCCESS writting new netcdf file: ", FILE_NAME, "!"
@@ -280,33 +337,3 @@ program netcdf_mean_to_bin
     end subroutine to_netcdf
 
 end program netcdf_mean_to_bin
-
-function load_climatology ( yearday, NX, NY, is_leap ) result(clim)
-  implicit none
-  ! Input/Output data
-  integer, intent(in)  :: yearday, NX, NY
-  logical, intent(in)  :: is_leap
-  real                 :: clim(NX,NY)
-  integer              :: climid, slcid
-
-  ! Climatology data
-  character (len = *), parameter :: CLIM_BASE = &
-  "/data/datos/jason_duacs/nrt_data/grid_duacs_allsat_clim/clim_duacs_1993-2010_365.dat"
-  character (len = :), allocatable :: CLIM_FILE
-  
-  if ( is_leap .EQV. .true. ) then
-    CLIM_FILE = CLIM_BASE(:len(CLIM_BASE)-7) //"366.dat"
-  else
-    CLIM_FILE = CLIM_BASE
-  end if
-  write(*,'(a,1x,a,/)') "Loading climatology from file: ", CLIM_FILE
-
-  open(newunit=climid, file=CLIM_FILE, form="unformatted", &
-        access="direct", recl=NX*NY*4, &
-        status="old", convert="big_endian")
-  read(unit=climid, rec=yearday) clim
-  close(unit=climid)
-
-end function load_climatology
-
-
