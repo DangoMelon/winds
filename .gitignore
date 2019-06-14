@@ -7,4 +7,4 @@
 *slurm*
 *dask-worker*
 *logs
-Cluster/src
+*Cluster/*/src
