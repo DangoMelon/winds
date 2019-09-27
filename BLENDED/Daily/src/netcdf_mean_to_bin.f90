@@ -18,6 +18,8 @@ program netcdf_mean_to_bin
                          acumx(NX, NY) = 0., acumy(NX, NY) = 0.
   real                :: TAUx(NX, NY), TAUy(NX, NY), &
                          taux_anom(NX,NY), tauy_anom(NX,NY)
+  real                :: ewdata(NX, NY), nwdata(NX, NY), &
+                         ewacum(NX, NY), nwacum(NX, NY)
 
   integer             :: file_count = 0
 
@@ -64,8 +66,10 @@ program netcdf_mean_to_bin
     end if
     ix_counter = f_ix + 2
     file_name = IN_FILE(ix_prev:ix_counter+ix_prev-1)
-    call load_wind(file_name, NX, NY, TAUx, TAUy, &
+    call load_wind(file_name, NX, NY, TAUx, TAUy, ewdata, nwdata, &
                    lat_data, lon_data, time_raw, time_data, is_leap)
+    ewacum =+ ewdata
+    nwacum =+ nwdata
     acumx =+ TAUx
     acumy =+ TAUy
     ix_counter = ix_counter + 1
@@ -73,6 +77,8 @@ program netcdf_mean_to_bin
     file_count=+1
   end do
 
+  ewacum = ewacum/file_count
+  nwacum = nwacum/file_count
   acumx = acumx/file_count
   acumy = acumy/file_count
   
@@ -91,6 +97,7 @@ program netcdf_mean_to_bin
   end where
 
   call to_netcdf(OUT_FILE_NC, lat_data, lon_data, time_raw, &
+                 ewacum, nwacum, &
                  acumx, acumy, taux_anom, tauy_anom, NX, NY)
 
   ! Write binary file with data
@@ -154,14 +161,15 @@ program netcdf_mean_to_bin
     end subroutine load_climatology
 
     subroutine load_wind( WIND_NC, NX, NY, taux, tauy, &
-                         lat_data, lon_data, time_raw, &
-                         time_data, is_leap)
+                          ew_data, nw_data, &
+                          lat_data, lon_data, time_raw, &
+                          time_data, is_leap)
       character (len = *) , intent(in) :: WIND_NC
       integer, intent(in)  :: NX, NY
       integer, intent(out) :: time_raw, time_data
       real   , intent(out) :: taux(NX,NY), tauy(NX,NY), lat_data(NY), lon_data(NX)
       logical, intent(out) :: is_leap
-      real   :: ew_data(NX, NY), nw_data(NX, NY)
+      real   , intent(out) :: ew_data(NX, NY), nw_data(NX, NY)
 
       ! Netcdf I/O
       integer :: ncid
@@ -199,8 +207,8 @@ program netcdf_mean_to_bin
       call check( nf90_get_var(ncid,   nwid,  nw_data) )
       call check( nf90_get_var(ncid,    tid, time_data) )
 
-      lat_data = [(-80+0.25*i,i=0,NY-1)]
-      lon_data = [(-180+0.25*i,i=0,NX-1)]
+      lat_data = [(-79.9375+0.25*i,i=0,NY-1)]
+      lon_data = [(-179.9375+0.25*i,i=0,NX-1)]
 
       ! Compute wind stress
       where( ew_data /= 9.96920996838687e+36 .and. nw_data /= 9.96920996838687e+36 )
@@ -210,6 +218,8 @@ program netcdf_mean_to_bin
       elsewhere
         taux = -999.
         tauy = -999.
+        ew_data = -999.
+        nw_data = -999.
       end where
 
       ! Get time units
@@ -236,10 +246,13 @@ program netcdf_mean_to_bin
 
     end subroutine load_wind
 
-    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, TAUx, TAUy, &
+    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, &
+                         ew_data, nw_data, TAUx, TAUy, &
                          TAUx_anom, TAUy_anom, NX, NY)
       integer, intent(in) :: NX, NY, time_raw
-      real   , intent(in) :: TAUx(NX,NY), TAUy(NX,NY), TAUx_anom(NX,NY), TAUy_anom(NX,NY)
+      real   , intent(in) :: ew_data(NX,NY), nw_data(NX,NY),&
+                             TAUx(NX,NY), TAUy(NX,NY), &
+                             TAUx_anom(NX,NY), TAUy_anom(NX,NY)
       real   , intent(in) :: lats(NY), lons(NX)
 
       ! File naming
@@ -252,7 +265,8 @@ program netcdf_mean_to_bin
       integer :: lon_dimid, lat_dimid, rec_dimid
 
       ! Variables definitions
-      integer :: taux_varid, tauy_varid, tauxa_varid, tauya_varid
+      integer :: ew_varid, nw_varid, taux_varid, &
+                 tauy_varid, tauxa_varid, tauya_varid
       integer :: dimids(NDIMS)
 
       ! Record counter
@@ -286,11 +300,23 @@ program netcdf_mean_to_bin
       
       dimids = [ lon_dimid, lat_dimid, rec_dimid ]
       ! Define variables
+      call check( nf90_def_var(new_ncid,     "ewind", nf90_real, dimids, ew_varid) )
+      call check( nf90_def_var(new_ncid,     "nwind", nf90_real, dimids, nw_varid) )
       call check( nf90_def_var(new_ncid,      "taux", nf90_real, dimids, taux_varid) )
       call check( nf90_def_var(new_ncid,      "tauy", nf90_real, dimids, tauy_varid) )
       call check( nf90_def_var(new_ncid, "taux_anom", nf90_real, dimids, tauxa_varid) )
       call check( nf90_def_var(new_ncid, "tauy_anom", nf90_real, dimids, tauya_varid) )
       ! Add attributes
+      call check( nf90_put_att(new_ncid,    ew_varid,     "long_name", "eastward wind") )
+      call check( nf90_put_att(new_ncid,    ew_varid, "standard_name", "eastward wind speed") )
+      call check( nf90_put_att(new_ncid,    ew_varid,         "units", "m s-1") )
+      call check( nf90_put_att(new_ncid,    ew_varid,    "_FillValue", -999.) )
+      !++++++++++
+      call check( nf90_put_att(new_ncid,    nw_varid,     "long_name", "northward wind") )
+      call check( nf90_put_att(new_ncid,    nw_varid, "standard_name", "northward wind speed") )
+      call check( nf90_put_att(new_ncid,    nw_varid,         "units", "m s-1") )
+      call check( nf90_put_att(new_ncid,    nw_varid,    "_FillValue", -999.) )
+      !++++++++++
       call check( nf90_put_att(new_ncid,  taux_varid,     "long_name", "eastward wind stress") )
       call check( nf90_put_att(new_ncid,  taux_varid, "standard_name", "surface_downward_eastward_stress") )
       call check( nf90_put_att(new_ncid,  taux_varid,         "units", "N/m^2") )
@@ -330,6 +356,8 @@ program netcdf_mean_to_bin
       start  = [  1,  1, 1 ]
 
       ! Write variable data
+      call check( nf90_put_var(new_ncid,    ew_varid,   ew_data, start = start, count = counts) )
+      call check( nf90_put_var(new_ncid,    nw_varid,   nw_data, start = start, count = counts) )
       call check( nf90_put_var(new_ncid,  taux_varid,      TAUx, start = start, count = counts) )
       call check( nf90_put_var(new_ncid,  tauy_varid,      TAUy, start = start, count = counts) )
       call check( nf90_put_var(new_ncid, tauxa_varid, TAUx_anom, start = start, count = counts) )
