@@ -102,9 +102,9 @@ program netcdf_mean_to_bin
 
   ! Write binary file with data
   open(newunit=out_id, file=OUT_FILE, form="unformatted", &
-        access="direct", recl=NX*NY*4*4, &
+        access="direct", recl=NX*NY*4*6, &
         status="unknown", convert="big_endian")
-  write(unit=out_id,rec=1) acumx, acumy, taux_anom, tauy_anom
+  write(unit=out_id,rec=1) ewacum, nwacum, acumx, acumy, taux_anom, tauy_anom
   close(unit=out_id)
 
 
