@@ -51,13 +51,13 @@ program create_empty_bin
 
   ! Write binary file with data
   open(newunit=out_id, file=OUT_FILE, form="unformatted", &
-        access="direct", recl=NX*NY*4*4, &
+        access="direct", recl=NX*NY*4*6, &
         status="unknown", convert="big_endian")
-  write(unit=out_id,rec=1) TAU, TAU, TAU, TAU
+  write(unit=out_id,rec=1) TAU, TAU, TAU, TAU, TAU, TAU
   close(unit=out_id)
 
   call to_netcdf(OUT_FILE_NC, lat_data, lon_data, t_delta % getDays(), &
-                  TAU, TAU, TAU, TAU, NX, NY)
+                  TAU, TAU, TAU, TAU, TAU, TAU, NX, NY)
 
   contains
 
@@ -70,10 +70,13 @@ program create_empty_bin
       end if
     end subroutine check
 
-    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, TAUx, TAUy, &
-        TAUx_anom, TAUy_anom, NX, NY)
+    subroutine to_netcdf(FILE_NAME, lats, lons, time_raw, &
+      ew_data, nw_data, TAUx, TAUy, &
+      TAUx_anom, TAUy_anom, NX, NY)
       integer, intent(in) :: NX, NY, time_raw
-      real   , intent(in) :: TAUx(NX,NY), TAUy(NX,NY), TAUx_anom(NX,NY), TAUy_anom(NX,NY)
+      real   , intent(in) :: ew_data(NX,NY), nw_data(NX,NY),&
+                             TAUx(NX,NY), TAUy(NX,NY), &
+                             TAUx_anom(NX,NY), TAUy_anom(NX,NY)
       real   , intent(in) :: lats(NY), lons(NX)
 
       ! File naming
@@ -86,7 +89,8 @@ program create_empty_bin
       integer :: lon_dimid, lat_dimid, rec_dimid
 
       ! Variables definitions
-      integer :: taux_varid, tauy_varid, tauxa_varid, tauya_varid
+      integer :: ew_varid, nw_varid, taux_varid, &
+                 tauy_varid, tauxa_varid, tauya_varid
       integer :: dimids(NDIMS)
 
       ! Record counter
@@ -120,11 +124,23 @@ program create_empty_bin
 
       dimids = [ lon_dimid, lat_dimid, rec_dimid ]
       ! Define variables
+      call check( nf90_def_var(new_ncid,     "ewind", nf90_real, dimids, ew_varid) )
+      call check( nf90_def_var(new_ncid,     "nwind", nf90_real, dimids, nw_varid) )
       call check( nf90_def_var(new_ncid,      "taux", nf90_real, dimids, taux_varid) )
       call check( nf90_def_var(new_ncid,      "tauy", nf90_real, dimids, tauy_varid) )
       call check( nf90_def_var(new_ncid, "taux_anom", nf90_real, dimids, tauxa_varid) )
       call check( nf90_def_var(new_ncid, "tauy_anom", nf90_real, dimids, tauya_varid) )
       ! Add attributes
+      call check( nf90_put_att(new_ncid,    ew_varid,     "long_name", "eastward wind") )
+      call check( nf90_put_att(new_ncid,    ew_varid, "standard_name", "eastward wind speed") )
+      call check( nf90_put_att(new_ncid,    ew_varid,         "units", "m s-1") )
+      call check( nf90_put_att(new_ncid,    ew_varid,    "_FillValue", -999.) )
+      !++++++++++
+      call check( nf90_put_att(new_ncid,    nw_varid,     "long_name", "northward wind") )
+      call check( nf90_put_att(new_ncid,    nw_varid, "standard_name", "northward wind speed") )
+      call check( nf90_put_att(new_ncid,    nw_varid,         "units", "m s-1") )
+      call check( nf90_put_att(new_ncid,    nw_varid,    "_FillValue", -999.) )
+      !++++++++++
       call check( nf90_put_att(new_ncid,  taux_varid,     "long_name", "eastward wind stress") )
       call check( nf90_put_att(new_ncid,  taux_varid, "standard_name", "surface_downward_eastward_stress") )
       call check( nf90_put_att(new_ncid,  taux_varid,         "units", "N/m^2") )
@@ -164,6 +180,8 @@ program create_empty_bin
       start  = [  1,  1, 1 ]
 
       ! Write variable data
+      call check( nf90_put_var(new_ncid,    ew_varid,   ew_data, start = start, count = counts) )
+      call check( nf90_put_var(new_ncid,    nw_varid,   nw_data, start = start, count = counts) )
       call check( nf90_put_var(new_ncid,  taux_varid,      TAUx, start = start, count = counts) )
       call check( nf90_put_var(new_ncid,  tauy_varid,      TAUy, start = start, count = counts) )
       call check( nf90_put_var(new_ncid, tauxa_varid, TAUx_anom, start = start, count = counts) )
